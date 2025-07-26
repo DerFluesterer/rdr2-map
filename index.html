@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>RDR2 Offline Map mit Marker-Index</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .leaflet-popup-content { min-width: 180px; }
+    select, input, button, textarea { width: 100%; margin-top: 5px; }
+
+    #sidebar {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      border: 1px solid #444;
+      padding: 10px;
+      max-height: 90%;
+      width: 260px;
+      overflow-y: auto;
+      font-family: sans-serif;
+      z-index: 1000;
+      display: none;
+      border-radius: 6px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+
+    #toggleSidebar {
+      position: absolute;
+      top: 85px;
+      left: 10px;
+      z-index: 1100;
+      background: #000;
+      color: white;
+      border: 1px solid #444;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 20px;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .marker-entry {
+      padding: 4px;
+      border-bottom: 1px solid #666;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .marker-entry span {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+    }
+
+    .marker-entry img {
+      width: 20px;
+      height: 20px;
+      margin-right: 6px;
+    }
+
+    .marker-entry button {
+      margin-left: 5px;
+      background: red;
+      color: white;
+      border: none;
+      padding: 2px 6px;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+
+    #searchInput {
+      width: 100%;
+      margin-bottom: 10px;
+      padding: 5px;
+      border-radius: 3px;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <button id="toggleSidebar" title="Marker-Übersicht anzeigen">📋</button>
+  <div id="sidebar">
+    <input type="text" id="searchInput" placeholder="Name oder Typ durchsuchen...">
+    <div id="markerList"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map', {
+      crs: L.CRS.Simple,
+      minZoom: -4,
+      scrollWheelZoom: true,
+      dragging: true
+    });
+
+    const bounds = [[0, 0], [6840, 9091]];
+    L.imageOverlay('karte.jpg', bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    const icons = {
+      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32, 32], iconAnchor: [16, 32], popupAnchor: [0, -32] }),
+      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32, 32], iconAnchor: [16, 32], popupAnchor: [0, -32] }),
+      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32, 32], iconAnchor: [16, 32], popupAnchor: [0, -32] }),
+      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32, 32], iconAnchor: [16, 32], popupAnchor: [0, -32] }),
+      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32, 32], iconAnchor: [16, 32], popupAnchor: [0, -32] })
+    };
+
+    const currentMarkers = [];
+    const leafletMarkers = [];
+
+    const sidebar = document.getElementById('sidebar');
+    const toggleBtn = document.getElementById('toggleSidebar');
+    const searchInput = document.getElementById('searchInput');
+    const markerList = document.getElementById('markerList');
+
+    toggleBtn.addEventListener('click', () => {
+      sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
+    });
+
+    searchInput.addEventListener('input', updateSidebar);
+
+    function saveMarkers() {
+      const saved = currentMarkers.map(m => ({ name: m.name, type: m.type, latlng: m.latlng, description: m.description }));
+      localStorage.setItem('rdr2_markers', JSON.stringify(saved));
+    }
+
+    function updateSidebar() {
+      markerList.innerHTML = '';
+      const query = searchInput.value.toLowerCase();
+      const filtered = currentMarkers.filter(m =>
+        m.name.toLowerCase().includes(query) || m.type.toLowerCase().includes(query)
+      );
+
+      if (filtered.length === 0) {
+        markerList.innerHTML = '<p>Keine Marker gefunden.</p>';
+        return;
+      }
+
+      const grouped = {};
+      filtered.forEach(marker => {
+        if (!grouped[marker.type]) grouped[marker.type] = [];
+        grouped[marker.type].push(marker);
+      });
+
+      Object.keys(grouped).sort().forEach(type => {
+        const heading = document.createElement('h4');
+        heading.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+        heading.style.margin = '10px 0 4px 0';
+        heading.style.borderBottom = '1px solid #666';
+        markerList.appendChild(heading);
+
+        grouped[type].sort((a, b) => a.name.localeCompare(b.name)).forEach((m, i) => {
+          const entry = document.createElement('div');
+          entry.className = 'marker-entry';
+
+          const span = document.createElement('span');
+          const iconImg = document.createElement('img');
+          iconImg.src = icons[m.type].options.iconUrl;
+          span.appendChild(iconImg);
+          span.appendChild(document.createTextNode(m.name));
+
+          span.onclick = () => {
+            const latlng = L.latLng(m.latlng.lat, m.latlng.lng);
+            map.flyTo(latlng, 2); // oder z.B. 4 oder map.getZoom()
+            const marker = leafletMarkers[currentMarkers.indexOf(m)];
+            if (marker) marker.openPopup();
+          };
+
+          const editBtn = document.createElement('button');
+          editBtn.textContent = '✎';
+          editBtn.onclick = () => {
+            const newDesc = prompt('Beschreibung für "' + m.name + '":', m.description || '');
+            if (newDesc !== null) {
+              m.description = newDesc;
+              leafletMarkers[currentMarkers.indexOf(m)].bindPopup(`<strong>${m.name}</strong>${newDesc ? '<br>' + newDesc : ''}`);
+              saveMarkers();
+            }
+          };
+
+          const delBtn = document.createElement('button');
+          delBtn.textContent = '×';
+          delBtn.onclick = () => {
+            map.removeLayer(leafletMarkers[currentMarkers.indexOf(m)]);
+            const index = currentMarkers.indexOf(m);
+            if (index !== -1) {
+              currentMarkers.splice(index, 1);
+              leafletMarkers.splice(index, 1);
+              saveMarkers();
+              updateSidebar();
+            }
+          };
+
+          entry.appendChild(span);
+          entry.appendChild(editBtn);
+          entry.appendChild(delBtn);
+          markerList.appendChild(entry);
+        });
+      });
+    }
+
+    function loadMarkers() {
+      const data = localStorage.getItem('rdr2_markers');
+      return data ? JSON.parse(data) : [];
+    }
+
+    loadMarkers().forEach(m => {
+      const marker = L.marker(m.latlng, { icon: icons[m.type] }).addTo(map);
+      const popupContent = `<strong>${m.name}</strong>${m.description ? '<br>' + m.description : ''}`;
+      marker.bindPopup(popupContent);
+      currentMarkers.push(m);
+      leafletMarkers.push(marker);
+    });
+    updateSidebar();
+
+    map.on('click', function(e) {
+      const latlng = e.latlng;
+      const container = L.DomUtil.create('div');
+
+      const input = L.DomUtil.create('input', '', container);
+      input.type = 'text';
+      input.placeholder = 'Ort benennen';
+
+      const textarea = L.DomUtil.create('textarea', '', container);
+      textarea.placeholder = 'Optionaler Beschreibungstext';
+
+      const select = L.DomUtil.create('select', '', container);
+      select.innerHTML = `
+        <option value="crime">Verbrechen</option>
+        <option value="treasure">Schatz</option>
+        <option value="money">Geld</option>
+        <option value="drugs">Drogen</option>
+        <option value="blackmarket">Schwarzmarkt</option>
+      `;
+
+      const button = L.DomUtil.create('button', '', container);
+      button.textContent = 'Marker setzen';
+
+      container.appendChild(document.createElement('br'));
+      container.appendChild(select);
+      container.appendChild(button);
+
+      const popup = L.popup()
+        .setLatLng(latlng)
+        .setContent(container)
+        .openOn(map);
+
+      button.onclick = () => {
+        const type = select.value;
+        const icon = icons[type];
+        const name = input.value || 'Unbenannt';
+        const description = textarea.value;
+        const marker = L.marker(latlng, { icon }).addTo(map);
+        const popupContent = `<strong>${name}</strong>${description ? '<br>' + description : ''}`;
+        marker.bindPopup(popupContent);
+        map.closePopup();
+
+        const markerData = { latlng, type, name, description };
+        currentMarkers.push(markerData);
+        leafletMarkers.push(marker);
+        saveMarkers();
+        updateSidebar();
+      };
+    });
+  </script>
+</body>
+</html>
