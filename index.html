@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>RDR2 Map (mit Supabase Login)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    #sidebar, #loginBox {
+      position: absolute; background: #111; color: white; font-family: sans-serif;
+      z-index: 1000; padding: 10px; border-radius: 6px;
+    }
+    #sidebar {
+      top: 10px; right: 10px; width: 270px; max-height: 90%; overflow-y: auto; display: none;
+    }
+    #toggleSidebar {
+      position: absolute; top: 85px; left: 10px; z-index: 1100;
+      background: #000; color: white; border: 1px solid #444; border-radius: 4px;
+      width: 40px; height: 40px; font-size: 20px; display: flex; align-items: center; justify-content: center;
+    }
+    .marker-entry { margin-bottom: 8px; border-bottom: 1px solid #666; padding-bottom: 4px; }
+    .marker-entry img { width: 20px; height: 20px; margin-right: 5px; }
+    button { margin-top: 5px; }
+    #loginBox {
+      top: 10px; left: 10px; width: 250px;
+    }
+    #logoutBtn { margin-top: 5px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <button id="toggleSidebar">📋</button>
+
+  <div id="sidebar">
+    <input type="text" id="searchInput" placeholder="Name oder Typ durchsuchen..." />
+    <div id="markerList"></div>
+  </div>
+
+  <div id="loginBox">
+    <div id="authStatus">🔒 Nicht eingeloggt</div>
+    <div id="loginForm">
+      <input type="email" id="emailInput" placeholder="Deine E-Mail" /><br>
+      <button id="loginBtn">Login-Link senden</button>
+    </div>
+    <button id="logoutBtn" style="display:none;">Abmelden</button>
+  </div>
+
+  <!-- Leaflet + Supabase -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    const SUPABASE_URL = 'https://glumuovudtoxtuuuqbyu.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsdW11b3Z1ZHRveHR1dXVxYnl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MjA2NDgsImV4cCI6MjA2OTE5NjY0OH0.tL5FDsl5cvelAL34IJcsnASQjAiuKbtrqzsXtk0O_pQ';
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let session = null;
+
+    const map = L.map('map', { crs: L.CRS.Simple, minZoom: -4 });
+    const bounds = [[0, 0], [6840, 9091]];
+    L.imageOverlay('karte.jpg', bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    const icons = {
+      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
+      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
+      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
+      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
+      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32, 32], iconAnchor: [16, 32] })
+    };
+
+    const currentMarkers = [];
+
+    async function loadMarkers() {
+      const { data, error } = await supabase.from('markers').select('*');
+      if (error) return alert('Fehler beim Laden der Marker');
+      data.forEach(m => addMarkerToMap(m));
+      updateSidebar();
+    }
+
+    async function saveMarker(marker) {
+      const { error } = await supabase.from('markers').insert(marker);
+      if (error) return alert('Fehler beim Speichern');
+      location.reload();
+    }
+
+    async function deleteMarker(id) {
+      const { error } = await supabase.from('markers').delete().eq('id', id);
+      if (error) return alert('Fehler beim Löschen');
+      location.reload();
+    }
+
+    function addMarkerToMap(m) {
+      const marker = L.marker([m.lat, m.lng], { icon: icons[m.type] }).addTo(map);
+      marker.bindPopup(`<b>${m.name}</b><br>${m.description || ''}`);
+      currentMarkers.push({ ...m, leaflet: marker });
+    }
+
+    map.on('click', e => {
+      if (!session) {
+        alert('Nur angemeldete Benutzer können Marker erstellen.');
+        return;
+      }
+
+      const container = L.DomUtil.create('div');
+
+      const name = L.DomUtil.create('input', '', container);
+      name.placeholder = 'Name';
+
+      const desc = L.DomUtil.create('textarea', '', container);
+      desc.placeholder = 'Beschreibung';
+
+      const select = L.DomUtil.create('select', '', container);
+      ['crime', 'treasure', 'money', 'drugs', 'blackmarket'].forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t; opt.text = t;
+        select.appendChild(opt);
+      });
+
+      const btn = L.DomUtil.create('button', '', container);
+      btn.innerText = 'Speichern';
+
+      const popup = L.popup().setLatLng(e.latlng).setContent(container).openOn(map);
+
+      btn.onclick = () => {
+        const marker = {
+          name: name.value || 'Unbenannt',
+          description: desc.value,
+          type: select.value,
+          lat: e.latlng.lat,
+          lng: e.latlng.lng
+        };
+        saveMarker(marker);
+        map.closePopup();
+      };
+    });
+
+    function updateSidebar() {
+      const list = document.getElementById('markerList');
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      list.innerHTML = '';
+
+      currentMarkers
+        .filter(m => m.name.toLowerCase().includes(search) || m.type.toLowerCase().includes(search))
+        .forEach(m => {
+          const div = document.createElement('div');
+          div.className = 'marker-entry';
+          div.innerHTML = `
+            <img src="${icons[m.type].options.iconUrl}" />
+            <strong>${m.name}</strong><br/>
+            ${m.description || ''}<br/>
+            <button onclick="zoomTo('${m.id}')">Zoom</button>
+            ${session ? `<button onclick="deleteMarker('${m.id}')">❌</button>` : ''}
+          `;
+          list.appendChild(div);
+        });
+    }
+
+    function zoomTo(id) {
+      const m = currentMarkers.find(x => x.id === id);
+      if (m) {
+        map.flyTo([m.lat, m.lng], 2);
+        m.leaflet.openPopup();
+      }
+    }
+
+    document.getElementById('searchInput').addEventListener('input', updateSidebar);
+    document.getElementById('toggleSidebar').addEventListener('click', () => {
+      const s = document.getElementById('sidebar');
+      s.style.display = s.style.display === 'block' ? 'none' : 'block';
+    });
+
+    // Auth
+    document.getElementById('loginBtn').onclick = async () => {
+      const email = document.getElementById('emailInput').value;
+      if (!email) return alert('Bitte E-Mail eingeben');
+      const { error } = await supabase.auth.signInWithOtp({ email });
+      if (error) return alert('Login fehlgeschlagen');
+      alert('Login-Link wurde gesendet. Check dein Postfach.');
+    };
+
+    document.getElementById('logoutBtn').onclick = async () => {
+      await supabase.auth.signOut();
+      location.reload();
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      session = data.session;
+      updateAuthUI();
+    });
+
+    supabase.auth.onAuthStateChange((_event, newSession) => {
+      session = newSession;
+      updateAuthUI();
+    });
+
+    function updateAuthUI() {
+      const status = document.getElementById('authStatus');
+      const loginForm = document.getElementById('loginForm');
+      const logoutBtn = document.getElementById('logoutBtn');
+
+      if (session) {
+        status.innerText = '✅ Eingeloggt';
+        loginForm.style.display = 'none';
+        logoutBtn.style.display = 'block';
+      } else {
+        status.innerText = '🔒 Nicht eingeloggt';
+        loginForm.style.display = 'block';
+        logoutBtn.style.display = 'none';
+      }
+    }
+
+    loadMarkers();
+  </script>
+</body>
+</html>
