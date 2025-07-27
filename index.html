@@ -63,12 +63,12 @@
     #markerForm textarea {
       resize: vertical;
     }
-    #markerForm .btn-row {
+    .btn-row {
       display: flex;
       gap: 10px;
       margin-top: 10px;
     }
-    #markerForm .btn-row button {
+    .btn-row button {
       flex: 1;
     }
   </style>
@@ -91,8 +91,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     const SUPABASE_URL = "https://glumuovudtoxtuuuqbyu.supabase.co";
-    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
-    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsdW11b3Z1ZHRveHR1dXVxYnl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MjA2NDgsImV4cCI6MjA2OTE5NjY0OH0.tL5FDsl5cvelAL34IJcsnASQjAiuKbtrqzsXtk0O_pQ";
+    const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const map = L.map('map', {
       crs: L.CRS.Simple,
@@ -112,11 +112,10 @@
     const signupBtn = document.getElementById('signupBtn');
     const logoutBtn = document.getElementById('logoutBtn');
     const authMessage = document.getElementById('authMessage');
-
     let sessionUser = null;
 
     loginBtn.onclick = async () => {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await client.auth.signInWithPassword({
         email: emailInput.value,
         password: passwordInput.value
       });
@@ -129,53 +128,25 @@
     };
 
     signupBtn.onclick = async () => {
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error } = await client.auth.signUp({
         email: emailInput.value,
         password: passwordInput.value
       });
       if (error) {
         authMessage.textContent = "Fehler bei Registrierung: " + error.message;
       } else {
-        authMessage.textContent = "Registrierung erfolgreich! Bestätige die Mail.";
+        authMessage.textContent = "Registrierung erfolgreich! Bestätige die E-Mail.";
       }
     };
 
     logoutBtn.onclick = async () => {
-      await supabase.auth.signOut();
+      await client.auth.signOut();
       location.reload();
     };
 
-    async function initApp() {
-      authContainer.style.display = "none";
-      logoutBtn.style.display = "block";
-      loadMarkers();
-      map.on('click', onMapClick);
-    }
-
-    const icons = {
-      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32,32], iconAnchor: [16,32] }),
-      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32,32], iconAnchor: [16,32] }),
-      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32,32], iconAnchor: [16,32] }),
-      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32,32], iconAnchor: [16,32] }),
-      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32,32], iconAnchor: [16,32] })
-    };
-
-    async function loadMarkers() {
-      const { data, error } = await supabase.from("markers").select("*");
-      if (error) {
-        console.error("Ladefehler:", error);
-        return;
-      }
-      data.forEach(m => {
-        const icon = icons[m.type] || L.icon({ iconUrl: 'marker.png', iconSize: [32,32], iconAnchor: [16,32] });
-        const marker = L.marker([m.lat, m.lng], { icon }).addTo(map);
-        marker.bindPopup(`<strong>${m.name}</strong><br>${m.description || ""}`);
-      });
-    }
-
     function removeForm() {
-      const existingForm = document.getElementById("markerForm");
-      if (existingForm) existingForm.remove();
+      const existing = document.getElementById("markerForm");
+      if (existing) existing.remove();
     }
 
     async function onMapClick(e) {
@@ -214,7 +185,7 @@
           return;
         }
 
-        const { error } = await supabase.from("markers").insert({
+        const { error } = await client.from("markers").insert({
           name,
           type,
           lat: e.latlng.lat,
@@ -229,26 +200,60 @@
         }
       };
 
-      document.getElementById("markerCancel").onclick = () => {
-        removeForm();
-      };
+      document.getElementById("markerCancel").onclick = () => removeForm();
     }
 
-    // Automatischer Login bei Session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        sessionUser = session.user;
-        initApp();
-      }
-    });
+    async function initApp() {
+      authContainer.style.display = "none";
+      logoutBtn.style.display = "block";
+      await loadMarkers();
+      map.on('click', onMapClick);
+    }
 
-    // Magic Link Login
-    supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN") {
-        sessionUser = session.user;
-        initApp();
+    async function loadMarkers() {
+      const { data, error } = await client.from("markers").select("*");
+      if (error) {
+        console.error("Fehler beim Laden:", error);
+        return;
       }
-    });
+      const icons = {
+        crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32,32], iconAnchor: [16,32] }),
+        treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32,32], iconAnchor: [16,32] }),
+        money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32,32], iconAnchor: [16,32] }),
+        drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32,32], iconAnchor: [16,32] }),
+        blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      };
+
+      data.forEach(m => {
+        const icon = icons[m.type] || L.icon({ iconUrl: 'marker.png', iconSize: [32,32], iconAnchor: [16,32] });
+        const marker = L.marker([m.lat, m.lng], { icon }).addTo(map);
+        marker.bindPopup(`<strong>${m.name}</strong><br>${m.description || ""}`);
+      });
+    }
+
+    // Session + Magic Link Handling
+    (async () => {
+      const url = new URL(window.location.href);
+      const token = url.searchParams.get("token");
+      const type = url.searchParams.get("type");
+
+      if (type === "magiclink" && token) {
+        const { data, error } = await client.auth.getSessionFromUrl({ storeSession: true });
+        if (error) {
+          console.error("Fehler bei Magic Link:", error.message);
+        } else {
+          sessionUser = data.session.user;
+          initApp();
+          history.replaceState({}, document.title, "/rdr2-map/");
+        }
+      } else {
+        const { data: { session } } = await client.auth.getSession();
+        if (session?.user) {
+          sessionUser = session.user;
+          initApp();
+        }
+      }
+    })();
   </script>
 </body>
 </html>
