@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>RDR2 Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <style>
+    body {
+      margin: 0;
+      background: #dcdcdc;
+      font-family: Arial, sans-serif;
+    }
+    #map {
+      height: 100vh;
+      width: 100vw;
+    }
+    #markerFormPopup {
+      position: absolute;
+      background: white;
+      border: 1px solid #aaa;
+      padding: 12px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      z-index: 9999;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+
+    const isAdmin = window.location.search.includes("admin=1");
+
+    const supabaseUrl = "https://glumuovudtoxtuuuqbyu.supabase.co";
+    const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsdW11b3Z1ZHRveHR1dXVxYnl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MjA2NDgsImV4cCI6MjA2OTE5NjY0OH0.tL5FDsl5cvelAL34IJcsnASQjAiuKbtrqzsXtk0O_pQ";
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    const map = L.map("map", {
+      crs: L.CRS.Simple,
+      minZoom: -3,
+    });
+
+    const bounds = [[0, 0], [6840, 9091]];
+    const image = L.imageOverlay("karte.jpg", bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    let allMarkers = [];
+
+    async function loadMarkers() {
+      const { data, error } = await supabase.from("markers").select("*");
+      if (error) return console.error(error);
+      allMarkers.forEach(m => map.removeLayer(m));
+      allMarkers = data.map(m => {
+        const marker = L.marker([m.lat, m.lng])
+          .addTo(map)
+          .bindPopup(`<b>${m.name}</b><br>${m.description}`);
+        return marker;
+      });
+    }
+
+    loadMarkers();
+
+    if (isAdmin) {
+      map.on("click", e => {
+        const oldForm = document.getElementById("markerFormPopup");
+        if (oldForm) oldForm.remove();
+
+        const form = document.createElement("div");
+        form.id = "markerFormPopup";
+        form.style.left = e.originalEvent.pageX + "px";
+        form.style.top = e.originalEvent.pageY + "px";
+        form.innerHTML = `
+          <label>Name:<br><input id="mName" style="width: 200px;"></label><br>
+          <label>Typ:<br>
+            <select id="mType" style="width: 200px;">
+              <option value="crime">Crime</option>
+              <option value="treasure">Treasure</option>
+              <option value="money">Money</option>
+              <option value="drugs">Drugs</option>
+              <option value="blackmarket">Blackmarket</option>
+            </select>
+          </label><br>
+          <label>Beschreibung:<br><textarea id="mDesc" rows="3" style="width: 200px;"></textarea></label><br>
+          <button id="saveMarker">💾 Speichern</button>
+          <button id="cancelMarker">❌ Abbrechen</button>
+        `;
+        document.body.appendChild(form);
+
+        document.getElementById("cancelMarker").onclick = () => form.remove();
+
+        document.getElementById("saveMarker").onclick = async () => {
+          const name = document.getElementById("mName").value;
+          const type = document.getElementById("mType").value;
+          const description = document.getElementById("mDesc").value;
+
+          if (!name || !type) return alert("Name und Typ sind erforderlich!");
+
+          const { error } = await supabase.from("markers").insert({
+            name, type, description, lat: e.latlng.lat, lng: e.latlng.lng
+          });
+
+          if (error) {
+            alert("Fehler beim Speichern: " + error.message);
+            console.error(error);
+          } else {
+            form.remove();
+            loadMarkers();
+          }
+        };
+      });
+    }
+  </script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</body>
+</html>
