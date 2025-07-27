@@ -1,0 +1,215 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>RDR2 Online Map (Supabase)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .leaflet-popup-content { min-width: 180px; }
+    select, input, button, textarea { width: 100%; margin-top: 5px; }
+    #sidebar {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      border: 1px solid #444;
+      padding: 10px;
+      max-height: 90%;
+      width: 260px;
+      overflow-y: auto;
+      font-family: sans-serif;
+      z-index: 1000;
+      display: none;
+      border-radius: 6px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+    #toggleSidebar {
+      position: absolute;
+      top: 85px;
+      left: 10px;
+      z-index: 1100;
+      background: #000;
+      color: white;
+      border: 1px solid #444;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 20px;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .marker-entry {
+      padding: 4px;
+      border-bottom: 1px solid #666;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .marker-entry span {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+    }
+    .marker-entry img {
+      width: 20px;
+      height: 20px;
+      margin-right: 6px;
+    }
+    .marker-entry button {
+      margin-left: 5px;
+      background: red;
+      color: white;
+      border: none;
+      padding: 2px 6px;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    #searchInput {
+      width: 100%;
+      margin-bottom: 10px;
+      padding: 5px;
+      border-radius: 3px;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <button id="toggleSidebar" title="Marker-Übersicht anzeigen">📋</button>
+  <div id="sidebar">
+    <input type="text" id="searchInput" placeholder="Name oder Typ durchsuchen...">
+    <div id="markerList"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const supabase = supabase.createClient(
+      "https://glumuovudtoxtuuuqbyu.supabase.co",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsdW11b3Z1ZHRveHR1dXVxYnl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MjA2NDgsImV4cCI6MjA2OTE5NjY0OH0.tL5FDsl5cvelAL34IJcsnASQjAiuKbtrqzsXtk0O_pQ"
+    );
+
+    const map = L.map('map', { crs: L.CRS.Simple, minZoom: -4 });
+    const bounds = [[0, 0], [6840, 9091]];
+    L.imageOverlay('karte.jpg', bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    const icons = {
+      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
+      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
+      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
+      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
+      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32, 32], iconAnchor: [16, 32] })
+    };
+
+    const currentMarkers = [];
+    const leafletMarkers = [];
+
+    const sidebar = document.getElementById('sidebar');
+    const toggleBtn = document.getElementById('toggleSidebar');
+    const searchInput = document.getElementById('searchInput');
+    const markerList = document.getElementById('markerList');
+
+    toggleBtn.onclick = () => sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
+    searchInput.addEventListener('input', updateSidebar);
+
+    async function loadMarkers() {
+      const { data, error } = await supabase.from('markers').select('*');
+      if (error) {
+        console.error('Fehler beim Laden:', error);
+        return;
+      }
+      data.forEach(m => {
+        const marker = L.marker([m.lat, m.lng], { icon: icons[m.type] }).addTo(map);
+        const popupContent = `<strong>${m.name}</strong>${m.description ? '<br>' + m.description : ''}`;
+        marker.bindPopup(popupContent);
+        currentMarkers.push(m);
+        leafletMarkers.push(marker);
+      });
+      updateSidebar();
+    }
+
+    function updateSidebar() {
+      markerList.innerHTML = '';
+      const query = searchInput.value.toLowerCase();
+      const filtered = currentMarkers.filter(m =>
+        m.name.toLowerCase().includes(query) || m.type.toLowerCase().includes(query)
+      );
+
+      filtered.forEach(m => {
+        const entry = document.createElement('div');
+        entry.className = 'marker-entry';
+
+        const span = document.createElement('span');
+        const iconImg = document.createElement('img');
+        iconImg.src = icons[m.type].options.iconUrl;
+        span.appendChild(iconImg);
+        span.appendChild(document.createTextNode(m.name));
+        span.onclick = () => map.flyTo([m.lat, m.lng], 2);
+
+        entry.appendChild(span);
+        markerList.appendChild(entry);
+      });
+    }
+
+    map.on('click', function(e) {
+      const latlng = e.latlng;
+      const container = L.DomUtil.create('div');
+
+      const input = L.DomUtil.create('input', '', container);
+      input.type = 'text';
+      input.placeholder = 'Ort benennen';
+
+      const textarea = L.DomUtil.create('textarea', '', container);
+      textarea.placeholder = 'Optionaler Beschreibungstext';
+
+      const select = L.DomUtil.create('select', '', container);
+      select.innerHTML = `
+        <option value="crime">Verbrechen</option>
+        <option value="treasure">Schatz</option>
+        <option value="money">Geld</option>
+        <option value="drugs">Drogen</option>
+        <option value="blackmarket">Schwarzmarkt</option>
+      `;
+
+      const button = L.DomUtil.create('button', '', container);
+      button.textContent = 'Marker speichern';
+
+      container.appendChild(document.createElement('br'));
+      container.appendChild(select);
+      container.appendChild(button);
+
+      L.popup().setLatLng(latlng).setContent(container).openOn(map);
+
+      button.onclick = async () => {
+        const name = input.value || 'Unbenannt';
+        const description = textarea.value;
+        const type = select.value;
+        const { data, error } = await supabase.from('markers').insert([{
+          name, description, type, lat: latlng.lat, lng: latlng.lng
+        }]);
+        if (error) {
+          alert('Fehler beim Speichern!');
+          console.error(error);
+          return;
+        }
+        const marker = L.marker(latlng, { icon: icons[type] }).addTo(map);
+        const popup = `<strong>${name}</strong>${description ? '<br>' + description : ''}`;
+        marker.bindPopup(popup);
+        currentMarkers.push({ ...data[0] });
+        leafletMarkers.push(marker);
+        updateSidebar();
+        map.closePopup();
+      };
+    });
+
+    loadMarkers();
+  </script>
+</body>
+</html>
