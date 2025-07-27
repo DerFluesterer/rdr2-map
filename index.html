@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>RDR2 Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; background: #ddd; }
+    #authContainer {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 1001;
+      background: rgba(0,0,0,0.9);
+      color: white;
+      padding: 15px;
+      border-radius: 10px;
+      max-width: 300px;
+    }
+    #authContainer input, button {
+      width: 100%;
+      margin-top: 10px;
+      padding: 8px;
+      border: none;
+      border-radius: 5px;
+    }
+    #authContainer h2 {
+      margin-top: 0;
+    }
+    #logoutBtn {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1001;
+      background: red;
+      color: white;
+      padding: 6px 12px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #markerForm {
+      position: absolute;
+      top: 100px;
+      left: 20px;
+      z-index: 1002;
+      background: white;
+      color: black;
+      padding: 12px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      max-width: 250px;
+    }
+    #markerForm input, #markerForm select, #markerForm textarea, #markerForm button {
+      width: 100%;
+      margin-top: 8px;
+      padding: 6px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+    }
+    #markerForm textarea {
+      resize: vertical;
+    }
+    #markerForm .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    #markerForm .btn-row button {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="authContainer">
+    <h2>Login</h2>
+    <input type="email" id="email" placeholder="E-Mail" />
+    <input type="password" id="password" placeholder="Passwort" />
+    <button id="loginBtn">Login</button>
+    <button id="signupBtn">Registrieren</button>
+    <p id="authMessage"></p>
+  </div>
+
+  <button id="logoutBtn" style="display:none;">Logout</button>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = "https://glumuovudtoxtuuuqbyu.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const map = L.map('map', {
+      crs: L.CRS.Simple,
+      minZoom: -4,
+      scrollWheelZoom: true,
+      dragging: true
+    });
+
+    const bounds = [[0, 0], [6840, 9091]];
+    L.imageOverlay('karte.jpg', bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    const authContainer = document.getElementById('authContainer');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const loginBtn = document.getElementById('loginBtn');
+    const signupBtn = document.getElementById('signupBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const authMessage = document.getElementById('authMessage');
+
+    let sessionUser = null;
+
+    loginBtn.onclick = async () => {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: emailInput.value,
+        password: passwordInput.value
+      });
+      if (error) {
+        authMessage.textContent = "Fehler beim Login: " + error.message;
+      } else {
+        sessionUser = data.user;
+        initApp();
+      }
+    };
+
+    signupBtn.onclick = async () => {
+      const { data, error } = await supabase.auth.signUp({
+        email: emailInput.value,
+        password: passwordInput.value
+      });
+      if (error) {
+        authMessage.textContent = "Fehler bei Registrierung: " + error.message;
+      } else {
+        authMessage.textContent = "Registrierung erfolgreich! Bestätige die Mail.";
+      }
+    };
+
+    logoutBtn.onclick = async () => {
+      await supabase.auth.signOut();
+      location.reload();
+    };
+
+    async function initApp() {
+      authContainer.style.display = "none";
+      logoutBtn.style.display = "block";
+      loadMarkers();
+      map.on('click', onMapClick);
+    }
+
+    const icons = {
+      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32,32], iconAnchor: [16,32] })
+    };
+
+    async function loadMarkers() {
+      const { data, error } = await supabase.from("markers").select("*");
+      if (error) {
+        console.error("Ladefehler:", error);
+        return;
+      }
+      data.forEach(m => {
+        const icon = icons[m.type] || L.icon({ iconUrl: 'marker.png', iconSize: [32,32], iconAnchor: [16,32] });
+        const marker = L.marker([m.lat, m.lng], { icon }).addTo(map);
+        marker.bindPopup(`<strong>${m.name}</strong><br>${m.description || ""}`);
+      });
+    }
+
+    function removeForm() {
+      const existingForm = document.getElementById("markerForm");
+      if (existingForm) existingForm.remove();
+    }
+
+    async function onMapClick(e) {
+      if (!sessionUser) return;
+      removeForm();
+
+      const form = document.createElement("div");
+      form.id = "markerForm";
+      form.innerHTML = `
+        <label>Name:</label>
+        <input id="markerName" type="text" />
+        <label>Typ:</label>
+        <select id="markerType">
+          <option value="crime">Crime</option>
+          <option value="treasure">Treasure</option>
+          <option value="money">Money</option>
+          <option value="drugs">Drugs</option>
+          <option value="blackmarket">Blackmarket</option>
+        </select>
+        <label>Beschreibung:</label>
+        <textarea id="markerDesc" rows="3"></textarea>
+        <div class="btn-row">
+          <button id="markerSubmit">Speichern</button>
+          <button id="markerCancel">Abbrechen</button>
+        </div>
+      `;
+      document.body.appendChild(form);
+
+      document.getElementById("markerSubmit").onclick = async () => {
+        const name = document.getElementById("markerName").value;
+        const type = document.getElementById("markerType").value;
+        const description = document.getElementById("markerDesc").value;
+
+        if (!name || !type) {
+          alert("Bitte Name und Typ eingeben.");
+          return;
+        }
+
+        const { error } = await supabase.from("markers").insert({
+          name,
+          type,
+          lat: e.latlng.lat,
+          lng: e.latlng.lng,
+          description
+        });
+
+        if (error) {
+          alert("Fehler beim Speichern: " + error.message);
+        } else {
+          location.reload();
+        }
+      };
+
+      document.getElementById("markerCancel").onclick = () => {
+        removeForm();
+      };
+    }
+
+    // Automatischer Login bei Session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        sessionUser = session.user;
+        initApp();
+      }
+    });
+
+    // Magic Link Login
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN") {
+        sessionUser = session.user;
+        initApp();
+      }
+    });
+  </script>
+</body>
+</html>
