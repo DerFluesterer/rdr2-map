@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>RDR2 Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; background: #ddd; }
+
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1001;
+      background: #111;
+      color: #fff;
+      padding: 15px;
+      border-radius: 8px;
+    }
+
+    #controls input, #controls select {
+      width: 100%;
+      margin: 5px 0;
+      padding: 6px;
+      border-radius: 4px;
+      border: none;
+    }
+
+    .marker-btns button {
+      margin-top: 5px;
+      width: 48%;
+      padding: 5px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+    }
+
+    .delete-btn { background: #d33; color: #fff; }
+    .edit-btn { background: #3a3; color: #fff; }
+
+    #markerForm {
+      position: absolute;
+      top: 150px;
+      left: 10px;
+      z-index: 1002;
+      background: white;
+      padding: 12px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      max-width: 250px;
+    }
+
+    #markerForm input, #markerForm select, #markerForm textarea {
+      width: 100%;
+      margin-top: 8px;
+      padding: 6px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .btn-row button {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <label>🔍 Suche</label>
+    <input type="text" id="searchInput" placeholder="Name oder Beschreibung" />
+    <label⚙️ Filter nach Typ</label>
+    <select id="typeFilter">
+      <option value="">Alle</option>
+      <option value="crime">Crime</option>
+      <option value="treasure">Treasure</option>
+      <option value="money">Money</option>
+      <option value="drugs">Drugs</option>
+      <option value="blackmarket">Blackmarket</option>
+    </select>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = "https://glumuovudtoxtuuuqbyu.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsdW11b3Z1ZHRveHR1dXVxYnl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MjA2NDgsImV4cCI6MjA2OTE5NjY0OH0.tL5FDsl5cvelAL34IJcsnASQjAiuKbtrqzsXtk0O_pQ";
+    const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const isAdmin = window.location.search.includes("admin=1");
+
+    const map = L.map('map', {
+      crs: L.CRS.Simple,
+      minZoom: -4,
+      scrollWheelZoom: true,
+      dragging: true
+    });
+
+    const bounds = [[0, 0], [6840, 9091]];
+    L.imageOverlay('karte.jpg', bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    const icons = {
+      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32,32], iconAnchor: [16,32] })
+    };
+
+    let allMarkers = [];
+    let leafletMarkers = [];
+
+    async function loadMarkers() {
+      const { data, error } = await client.from("markers").select("*");
+      if (error) {
+        console.error("Fehler beim Laden der Marker:", error);
+        return;
+      }
+
+      allMarkers = data;
+      renderMarkers();
+    }
+
+    function renderMarkers() {
+      leafletMarkers.forEach(m => map.removeLayer(m));
+      leafletMarkers = [];
+
+      const search = document.getElementById("searchInput").value.toLowerCase();
+      const type = document.getElementById("typeFilter").value;
+
+      const filtered = allMarkers.filter(m =>
+        (!search || m.name.toLowerCase().includes(search) || (m.description || "").toLowerCase().includes(search)) &&
+        (!type || m.type === type)
+      );
+
+      filtered.forEach(m => {
+        const icon = icons[m.type] || icons.money;
+        const marker = L.marker([m.lat, m.lng], { icon }).addTo(map);
+
+        let popup = `<strong>${m.name}</strong><br>${m.description || ""}`;
+        if (isAdmin) {
+          popup += `
+            <div class="marker-btns">
+              <button class="edit-btn" onclick="editMarker('${m.id}')">✏️</button>
+              <button class="delete-btn" onclick="deleteMarker('${m.id}')">🗑️</button>
+            </div>`;
+        }
+
+        marker.bindPopup(popup);
+        leafletMarkers.push(marker);
+      });
+    }
+
+    function removeForm() {
+      const existingForm = document.getElementById("markerForm");
+      if (existingForm) existingForm.remove();
+    }
+
+    map.on("click", e => {
+      if (!isAdmin) return;
+      removeForm();
+
+      const form = document.createElement("div");
+      form.id = "markerForm";
+      form.innerHTML = `
+        <label>Name:</label>
+        <input id="markerName" type="text" />
+        <label>Typ:</label>
+        <select id="markerType">
+          <option value="crime">Crime</option>
+          <option value="treasure">Treasure</option>
+          <option value="money">Money</option>
+          <option value="drugs">Drugs</option>
+          <option value="blackmarket">Blackmarket</option>
+        </select>
+        <label>Beschreibung:</label>
+        <textarea id="markerDesc" rows="3"></textarea>
+        <div class="btn-row">
+          <button id="markerSave">Speichern</button>
+          <button id="markerCancel">Abbrechen</button>
+        </div>
+      `;
+      document.body.appendChild(form);
+
+      document.getElementById("markerSave").onclick = async () => {
+        const name = document.getElementById("markerName").value;
+        const type = document.getElementById("markerType").value;
+        const description = document.getElementById("markerDesc").value;
+
+        if (!name || !type) return alert("Bitte Name und Typ ausfüllen.");
+
+        const { error } = await client.from("markers").insert({ name, type, lat: e.latlng.lat, lng: e.latlng.lng, description });
+        if (error) {
+          alert("Fehler beim Speichern: " + error.message);
+        } else {
+          removeForm();
+          loadMarkers();
+        }
+      };
+
+      document.getElementById("markerCancel").onclick = removeForm;
+    });
+
+    window.editMarker = async (id) => {
+      const marker = allMarkers.find(m => m.id == id);
+      if (!marker) return;
+
+      removeForm();
+
+      const form = document.createElement("div");
+      form.id = "markerForm";
+      form.innerHTML = `
+        <label>Name:</label>
+        <input id="markerName" type="text" value="${marker.name}" />
+        <label>Typ:</label>
+        <select id="markerType">
+          <option value="crime" ${marker.type === "crime" ? "selected" : ""}>Crime</option>
+          <option value="treasure" ${marker.type === "treasure" ? "selected" : ""}>Treasure</option>
+          <option value="money" ${marker.type === "money" ? "selected" : ""}>Money</option>
+          <option value="drugs" ${marker.type === "drugs" ? "selected" : ""}>Drugs</option>
+          <option value="blackmarket" ${marker.type === "blackmarket" ? "selected" : ""}>Blackmarket</option>
+        </select>
+        <label>Beschreibung:</label>
+        <textarea id="markerDesc" rows="3">${marker.description || ""}</textarea>
+        <div class="btn-row">
+          <button id="markerUpdate">Aktualisieren</button>
+          <button id="markerCancel">Abbrechen</button>
+        </div>
+      `;
+      document.body.appendChild(form);
+
+      document.getElementById("markerUpdate").onclick = async () => {
+        const name = document.getElementById("markerName").value;
+        const type = document.getElementById("markerType").value;
+        const description = document.getElementById("markerDesc").value;
+
+        const { error } = await client.from("markers").update({ name, type, description }).eq("id", id);
+        if (error) {
+          alert("Fehler beim Aktualisieren: " + error.message);
+        } else {
+          removeForm();
+          loadMarkers();
+        }
+      };
+
+      document.getElementById("markerCancel").onclick = removeForm;
+    };
+
+    window.deleteMarker = async (id) => {
+      if (!confirm("Diesen Marker wirklich löschen?")) return;
+      const { error } = await client.from("markers").delete().eq("id", id);
+      if (error) {
+        alert("Fehler beim Löschen: " + error.message);
+      } else {
+        loadMarkers();
+      }
+    };
+
+    document.getElementById("searchInput").addEventListener("input", renderMarkers);
+    document.getElementById("typeFilter").addEventListener("change", renderMarkers);
+
+    loadMarkers();
+  </script>
+</body>
+</html>
