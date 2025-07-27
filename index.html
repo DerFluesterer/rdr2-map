@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>RDR2 Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; background: #ddd; }
+    #searchPanel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: #111;
+      color: #fff;
+      padding: 12px;
+      border-radius: 8px;
+      z-index: 1001;
+      font-family: sans-serif;
+      width: 320px;
+    }
+    #searchPanel input, #searchPanel select {
+      width: 100%;
+      margin-top: 6px;
+      padding: 6px;
+      border-radius: 4px;
+      border: none;
+    }
+    #markerListToggle {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1001;
+      background: #111;
+      color: #fff;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    #markerList {
+      position: absolute;
+      top: 50px;
+      right: 10px;
+      width: 300px;
+      max-height: 90%;
+      overflow-y: auto;
+      background: #fff;
+      color: #000;
+      padding: 10px;
+      border-radius: 6px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      z-index: 1001;
+      display: none;
+    }
+    .marker-item {
+      margin-bottom: 10px;
+      cursor: pointer;
+      padding: 6px;
+      border-bottom: 1px solid #ccc;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .marker-item:hover {
+      background: #f0f0f0;
+    }
+    .marker-icon {
+      width: 20px;
+      height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="searchPanel">
+    <label>🔍 Suche</label>
+    <input type="text" id="searchInput" placeholder="Name oder Beschreibung" />
+    <label>🎯 Filter nach Typ</label>
+    <select id="typeFilter">
+      <option value="all">Alle</option>
+      <option value="crime">Crime</option>
+      <option value="treasure">Treasure</option>
+      <option value="money">Money</option>
+      <option value="drugs">Drugs</option>
+      <option value="blackmarket">Blackmarket</option>
+    </select>
+  </div>
+
+  <div id="markerListToggle">📋 Liste</div>
+  <div id="markerList"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // ZUERST Supabase initialisieren
+    const SUPABASE_URL = "https://glumuovudtoxtuuuqbyu.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsdW11b3Z1ZHRveHR1dXVxYnl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MjA2NDgsImV4cCI6MjA2OTE5NjY0OH0.tL5FDsl5cvelAL34IJcsnASQjAiuKbtrqzsXtk0O_pQ";
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // Dann Map & Marker laden
+    const map = L.map('map', {
+      crs: L.CRS.Simple,
+      minZoom: -4
+    });
+    const bounds = [[0, 0], [6840, 9091]];
+    L.imageOverlay('karte.jpg', bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    const icons = {
+      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32,32], iconAnchor: [16,32] })
+    };
+
+    let allMarkers = [];
+
+    async function loadMarkers() {
+      const { data, error } = await supabase.from("markers").select("*");
+      if (error) {
+        console.error("Fehler beim Laden:", error);
+        return;
+      }
+
+      allMarkers = data.map(m => {
+        const icon = icons[m.type] || L.icon({ iconUrl: 'marker.png', iconSize: [32,32], iconAnchor: [16,32] });
+        const marker = L.marker([m.lat, m.lng], { icon }).addTo(map);
+        marker.bindPopup(`<strong>${m.name}</strong><br>${m.description || ""}`);
+        return { ...m, marker };
+      });
+
+      updateMarkerList();
+    }
+
+    function updateMarkerList() {
+      const list = document.getElementById("markerList");
+      const filter = document.getElementById("typeFilter").value;
+      const search = document.getElementById("searchInput").value.toLowerCase();
+
+      list.innerHTML = '';
+
+      const grouped = {};
+      allMarkers.forEach(m => {
+        if (filter !== 'all' && m.type !== filter) return;
+        if (search && !(m.name.toLowerCase().includes(search) || m.description?.toLowerCase().includes(search))) return;
+        if (!grouped[m.type]) grouped[m.type] = [];
+        grouped[m.type].push(m);
+      });
+
+      for (const [type, markers] of Object.entries(grouped)) {
+        const header = document.createElement('h4');
+        header.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+        list.appendChild(header);
+
+        markers.forEach(m => {
+          const div = document.createElement('div');
+          div.className = 'marker-item';
+          div.innerHTML = `<img src="${icons[m.type]?.options.iconUrl}" class="marker-icon"/> ${m.name}`;
+          div.onclick = () => {
+            map.flyTo([m.lat, m.lng], 1);
+            m.marker.openPopup();
+          };
+          list.appendChild(div);
+        });
+      }
+    }
+
+    document.getElementById("searchInput").addEventListener("input", updateMarkerList);
+    document.getElementById("typeFilter").addEventListener("change", updateMarkerList);
+    document.getElementById("markerListToggle").addEventListener("click", () => {
+      const panel = document.getElementById("markerList");
+      panel.style.display = panel.style.display === "none" ? "block" : "none";
+    });
+
+    loadMarkers();
+  </script>
+</body>
+</html>
