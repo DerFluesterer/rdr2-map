@@ -7,84 +7,67 @@
   <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet" />
   <style>
     html, body, #map { height: 100%; margin: 0; background: #ddd; }
-
-    #controls {
+    #controls, #markerListToggle {
       position: absolute;
-      top: 20px;
-      left: 20px;
-      z-index: 1000;
-      background: #111;
+      top: 10px;
+      left: 10px;
+      z-index: 1001;
+      background: black;
       color: white;
-      padding: 12px;
-      border-radius: 8px;
+      padding: 10px;
+      border-radius: 5px;
     }
-
     #controls input, #controls select {
       width: 100%;
-      margin: 5px 0;
+      margin-top: 5px;
       padding: 5px;
-      border-radius: 5px;
-      border: none;
-    }
-
-    #markerListToggle {
-      position: absolute;
-      right: 10px;
-      top: 10px;
-      z-index: 1001;
-      background: #111;
-      color: white;
-      border: none;
-      padding: 6px 10px;
       border-radius: 4px;
-      cursor: pointer;
+      border: none;
     }
-
+    #markerListToggle {
+      right: 10px;
+      left: auto;
+      padding: 4px 8px;
+      cursor: pointer;
+      background: #111;
+    }
     #markerList {
       position: absolute;
-      right: 0;
-      top: 50px;
-      width: 300px;
-      max-height: 90%;
+      top: 40px;
+      right: 10px;
+      width: 250px;
+      max-height: 80%;
       overflow-y: auto;
-      background: #222;
-      color: white;
+      background: white;
+      border-radius: 5px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.3);
       padding: 10px;
       z-index: 1000;
       display: none;
     }
-
-    #markerList h3 {
-      margin-top: 0;
-      font-size: 16px;
-      text-align: center;
-    }
-
-    .marker-item {
+    .marker-entry {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px;
-      border-bottom: 1px solid #444;
+      margin-bottom: 8px;
       cursor: pointer;
     }
-
-    .marker-item img {
+    .marker-entry img {
       width: 24px;
       height: 24px;
+      margin-right: 8px;
     }
-
-    .marker-item:hover {
-      background: #333;
+    .marker-entry span {
+      font-size: 14px;
     }
   </style>
 </head>
 <body>
+  <div id="map"></div>
   <div id="controls">
-    🔍 <strong>Suche</strong>
+    🔎 <strong>Suche</strong><br />
     <input type="text" id="searchInput" placeholder="Name oder Beschreibung" />
-    🎯 <strong>Filter nach Typ</strong>
-    <select id="typeFilter">
+    🧭 <strong>Filter nach Typ</strong><br />
+    <select id="filterSelect">
       <option value="alle">Alle</option>
       <option value="crime">Crime</option>
       <option value="treasure">Treasure</option>
@@ -94,27 +77,19 @@
     </select>
   </div>
 
-  <button id="markerListToggle">📋 Marker-Liste</button>
-  <div id="markerList">
-    <h3>Marker Übersicht</h3>
-    <div id="markerListItems"></div>
-  </div>
-
-  <div id="map"></div>
+  <button id="markerListToggle">📋 Liste</button>
+  <div id="markerList"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     const SUPABASE_URL = "https://glumuovudtoxtuuuqbyu.supabase.co";
-    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
-    const { createClient } = supabase;
-    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsdW11b3Z1ZHRveHR1dXVxYnl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MjA2NDgsImV4cCI6MjA2OTE5NjY0OH0.tL5FDsl5cvelAL34IJcsnASQjAiuKbtrqzsXtk0O_pQ";
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const map = L.map('map', {
       crs: L.CRS.Simple,
-      minZoom: -4,
-      scrollWheelZoom: true,
-      dragging: true
+      minZoom: -4
     });
 
     const bounds = [[0, 0], [6840, 9091]];
@@ -122,83 +97,87 @@
     map.fitBounds(bounds);
 
     const icons = {
-      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
-      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
-      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
-      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32, 32], iconAnchor: [16, 32] }),
-      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32, 32], iconAnchor: [16, 32] })
-    };
-
-    const iconUrls = {
-      crime: 'revolver.png',
-      treasure: 'schatzkiste.png',
-      money: 'Dollar.png',
-      drugs: 'Drogen.png',
-      blackmarket: 'Schwarzmarkt.png'
+      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      default: L.icon({ iconUrl: 'marker.png', iconSize: [32,32], iconAnchor: [16,32] })
     };
 
     let allMarkers = [];
-    const markerLayer = L.layerGroup().addTo(map);
-    const markerRefs = new Map();
 
     async function loadMarkers() {
-      const { data, error } = await supabaseClient.from("markers").select("*");
-      if (error) return console.error("Fehler beim Laden:", error.message);
+      const { data, error } = await supabase.from("markers").select("*");
+      if (error) {
+        console.error("Fehler beim Laden:", error.message);
+        return;
+      }
+
       allMarkers = data.sort((a, b) => a.type.localeCompare(b.type));
-      renderMarkers(allMarkers);
+      renderMarkers();
+      renderMarkerList();
     }
 
-    function renderMarkers(data) {
-      markerLayer.clearLayers();
-      markerRefs.clear();
-      const isAdmin = new URLSearchParams(window.location.search).get("admin") === "1";
-
-      data.forEach(m => {
-        const icon = icons[m.type] || icons["money"];
-        const marker = L.marker([m.lat, m.lng], { icon });
-        marker.bindPopup(`<strong>${m.name}</strong><br>${m.description || ""}`);
-        marker.addTo(markerLayer);
-        markerRefs.set(m.id, marker);
+    function renderMarkers() {
+      map.eachLayer(layer => {
+        if (layer instanceof L.Marker) map.removeLayer(layer);
       });
 
-      updateMarkerList(data);
-    }
-
-    function updateMarkerList(data) {
-      const list = document.getElementById("markerListItems");
-      list.innerHTML = "";
-      data.forEach(m => {
-        const div = document.createElement("div");
-        div.className = "marker-item";
-        div.innerHTML = `<img src="${iconUrls[m.type] || 'marker.png'}" /> ${m.name}`;
-        div.onclick = () => {
-          const marker = markerRefs.get(m.id);
-          if (marker) {
-            map.flyTo(marker.getLatLng(), 1);
-            marker.openPopup();
-          }
-        };
-        list.appendChild(div);
-      });
-    }
-
-    function filterMarkers() {
       const search = document.getElementById("searchInput").value.toLowerCase();
-      const type = document.getElementById("typeFilter").value;
+      const filter = document.getElementById("filterSelect").value;
 
-      const filtered = allMarkers.filter(m =>
-        (type === "alle" || m.type === type) &&
-        (`${m.name} ${m.description}`.toLowerCase().includes(search))
-      );
-
-      renderMarkers(filtered);
+      allMarkers.forEach(m => {
+        const matchesSearch = m.name.toLowerCase().includes(search) || m.description?.toLowerCase().includes(search);
+        const matchesType = filter === "alle" || m.type === filter;
+        if (matchesSearch && matchesType) {
+          const icon = icons[m.type] || icons.default;
+          const marker = L.marker([m.lat, m.lng], { icon }).addTo(map);
+          marker.bindPopup(`<strong>${m.name}</strong><br>${m.description || ""}`);
+          m._leaflet = marker; // Referenz für FlyTo
+        }
+      });
     }
 
-    document.getElementById("searchInput").addEventListener("input", filterMarkers);
-    document.getElementById("typeFilter").addEventListener("change", filterMarkers);
+    function renderMarkerList() {
+      const container = document.getElementById("markerList");
+      container.innerHTML = "";
+
+      const filter = document.getElementById("filterSelect").value;
+      const search = document.getElementById("searchInput").value.toLowerCase();
+
+      const filtered = allMarkers.filter(m => {
+        const matchType = filter === "alle" || m.type === filter;
+        const matchSearch = m.name.toLowerCase().includes(search) || m.description?.toLowerCase().includes(search);
+        return matchType && matchSearch;
+      });
+
+      filtered.forEach(m => {
+        const entry = document.createElement("div");
+        entry.className = "marker-entry";
+        entry.innerHTML = `<img src="${icons[m.type]?.options.iconUrl || icons.default.options.iconUrl}" />
+                           <span>${m.name}</span>`;
+        entry.onclick = () => {
+          map.flyTo([m.lat, m.lng], 1);
+          if (m._leaflet) m._leaflet.openPopup();
+        };
+        container.appendChild(entry);
+      });
+    }
+
+    document.getElementById("searchInput").addEventListener("input", () => {
+      renderMarkers();
+      renderMarkerList();
+    });
+
+    document.getElementById("filterSelect").addEventListener("change", () => {
+      renderMarkers();
+      renderMarkerList();
+    });
+
     document.getElementById("markerListToggle").addEventListener("click", () => {
-      const panel = document.getElementById("markerList");
-      panel.style.display = panel.style.display === "block" ? "none" : "block";
+      const list = document.getElementById("markerList");
+      list.style.display = list.style.display === "none" ? "block" : "none";
     });
 
     loadMarkers();
