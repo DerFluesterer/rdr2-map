@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>RDR2 Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; background: #ddd; }
+
+    #sidebar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1001;
+      background: rgba(0,0,0,0.85);
+      color: white;
+      padding: 12px;
+      border-radius: 8px;
+      max-width: 260px;
+      font-family: sans-serif;
+    }
+
+    #sidebar input, #sidebar select {
+      width: 100%;
+      margin-top: 5px;
+      padding: 6px;
+      border: none;
+      border-radius: 4px;
+    }
+
+    #markerList {
+      margin-top: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .marker-entry {
+      margin: 4px 0;
+      padding: 4px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .marker-entry:hover {
+      background: rgba(255,255,255,0.2);
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="sidebar">
+    <label>🔍 Suche</label>
+    <input id="searchInput" type="text" placeholder="Name oder Beschreibung">
+    <label>🎯 Filter nach Typ</label>
+    <select id="typeFilter">
+      <option value="">Alle</option>
+      <option value="crime">Crime</option>
+      <option value="treasure">Treasure</option>
+      <option value="money">Money</option>
+      <option value="drugs">Drugs</option>
+      <option value="blackmarket">Blackmarket</option>
+    </select>
+    <div id="markerList"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = "https://glumuovudtoxtuuuqbyu.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsdW11b3Z1ZHRveHR1dXVxYnl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM2MjA2NDgsImV4cCI6MjA2OTE5NjY0OH0.tL5FDsl5cvelAL34IJcsnASQjAiuKbtrqzsXtk0O_pQ";
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const isAdmin = window.location.search.includes("admin=1");
+    const markers = [];
+    const leafletMarkers = [];
+
+    const map = L.map('map', {
+      crs: L.CRS.Simple,
+      minZoom: -4,
+      scrollWheelZoom: true
+    });
+
+    const bounds = [[0, 0], [6840, 9091]];
+    L.imageOverlay('karte.jpg', bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    const icons = {
+      crime: L.icon({ iconUrl: 'revolver.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      treasure: L.icon({ iconUrl: 'schatzkiste.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      money: L.icon({ iconUrl: 'Dollar.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      drugs: L.icon({ iconUrl: 'Drogen.png', iconSize: [32,32], iconAnchor: [16,32] }),
+      blackmarket: L.icon({ iconUrl: 'Schwarzmarkt.png', iconSize: [32,32], iconAnchor: [16,32] })
+    };
+
+    async function loadMarkers() {
+      const { data, error } = await supabase.from("markers").select("*");
+      if (error) return alert("Fehler beim Laden der Marker.");
+
+      markers.length = 0;
+      leafletMarkers.forEach(m => m.remove());
+      leafletMarkers.length = 0;
+
+      data.forEach(m => {
+        markers.push(m);
+        const icon = icons[m.type] || undefined;
+        const marker = L.marker([m.lat, m.lng], { icon }).addTo(map);
+
+        let popup = `<strong>${m.name}</strong><br>${m.description || ""}`;
+
+        if (isAdmin) {
+          popup += `<br><button onclick="editMarker(${m.id})">✎</button> 
+                    <button onclick="deleteMarker(${m.id})">🗑</button>`;
+        }
+
+        marker.bindPopup(popup);
+        leafletMarkers.push(marker);
+      });
+
+      updateSidebar();
+    }
+
+    async function editMarker(id) {
+      const m = markers.find(x => x.id === id);
+      const name = prompt("Neuer Name:", m.name);
+      const desc = prompt("Neue Beschreibung:", m.description);
+      const type = prompt("Neuer Typ (crime, treasure, money, drugs, blackmarket):", m.type);
+
+      const { error } = await supabase.from("markers").update({
+        name, description: desc, type
+      }).eq("id", id);
+
+      if (error) alert("Fehler beim Bearbeiten.");
+      else loadMarkers();
+    }
+
+    async function deleteMarker(id) {
+      if (!confirm("Wirklich löschen?")) return;
+      const { error } = await supabase.from("markers").delete().eq("id", id);
+      if (error) alert("Fehler beim Löschen.");
+      else loadMarkers();
+    }
+
+    map.on('click', async function(e) {
+      if (!isAdmin) return;
+
+      const name = prompt("Name:");
+      const type = prompt("Typ (crime, treasure, money, drugs, blackmarket):");
+      const description = prompt("Beschreibung:");
+
+      if (!name || !type) return;
+
+      const { error } = await supabase.from("markers").insert({
+        name, type, description, lat: e.latlng.lat, lng: e.latlng.lng
+      });
+
+      if (error) alert("Fehler beim Speichern.");
+      else loadMarkers();
+    });
+
+    function updateSidebar() {
+      const list = document.getElementById("markerList");
+      const query = document.getElementById("searchInput").value.toLowerCase();
+      const filter = document.getElementById("typeFilter").value;
+
+      list.innerHTML = "";
+
+      markers
+        .filter(m =>
+          (!filter || m.type === filter) &&
+          (m.name.toLowerCase().includes(query) || (m.description || "").toLowerCase().includes(query))
+        )
+        .forEach((m, i) => {
+          const div = document.createElement("div");
+          div.className = "marker-entry";
+          div.innerText = `${m.name} (${m.type})`;
+          div.onclick = () => map.flyTo([m.lat, m.lng], 2);
+          list.appendChild(div);
+        });
+    }
+
+    document.getElementById("searchInput").addEventListener("input", updateSidebar);
+    document.getElementById("typeFilter").addEventListener("change", updateSidebar);
+
+    loadMarkers();
+  </script>
+</body>
+</html>
